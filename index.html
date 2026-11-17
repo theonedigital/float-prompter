@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Float Prompter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Inter:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000; --panel: #121214; --line: #26262a; --text: #f4f4f5; --muted: #8b8b93;
+    --accent: #3d4cff; --accent-2: #6b78ff; --ok: #2fd36b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 15px/1.45 Inter, -apple-system, system-ui, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    max-width: 640px; margin: 0 auto;
+  }
+  h1 { font-size: 22px; margin: 4px 0 2px; display: flex; align-items: center; gap: 8px; }
+  h1 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
+  label.h { display: block; font-weight: 600; margin-bottom: 8px; }
+  textarea {
+    width: 100%; min-height: 220px; resize: vertical; background: #000; color: var(--text);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+    font: 16px/1.5 "IBM Plex Mono", Menlo, monospace;
+  }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row span.v { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  .seg { display: flex; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button { background: none; border: 0; color: var(--muted); padding: 7px 11px; font: inherit; font-size: 14px; }
+  .seg button.on { background: #2a2a30; color: var(--text); }
+  .btn {
+    width: 100%; border: 0; border-radius: 14px; padding: 15px; font: 600 16px Inter, system-ui, sans-serif;
+    background: var(--accent); color: #fff; margin-top: 4px;
+  }
+  .btn:disabled { opacity: .45; }
+  .btn.ghost { background: #222228; }
+  .btn.go { background: var(--ok); color: #04130a; }
+  .bar { height: 6px; background: #222; border-radius: 3px; overflow: hidden; margin: 10px 0 4px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent-2); transition: width .1s; }
+  canvas, video { width: 100%; border-radius: 12px; background: #000; display: block; border: 1px solid var(--line); }
+  #out { display: none; }
+  #out video { margin-bottom: 10px; }
+  ol { padding-left: 20px; margin: 6px 0 0; color: #cfcfd4; }
+  ol li { margin: 4px 0; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .warn { color: #ffb648; font-size: 13px; margin-top: 8px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <h1><span class="dot"></span>Float Prompter</h1>
+  <p class="sub">A teleprompter that floats over the iPhone Camera app using Picture‑in‑Picture.</p>
+
+  <div class="card">
+    <label class="h" for="script">Script</label>
+    <textarea id="script" placeholder="Paste your script here. Leave a blank line between paragraphs for a short pause."></textarea>
+    <div class="meta" id="meta">0 words</div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span>Speed</span><input id="wpm" type="range" min="80" max="240" step="5" value="140"><span class="v" id="wpmV">140 wpm</span></div>
+    <div class="row"><span>Lines visible</span>
+      <div class="seg" data-key="lines"><button>3</button><button>4</button><button>5</button><button>6</button></div></div>
+    <div class="row"><span>Countdown</span>
+      <div class="seg" data-key="lead"><button>0</button><button>3</button><button>5</button></div></div>
+    <div class="row"><span>Font</span>
+      <div class="seg" data-key="font"><button>Mono</button><button>Sans</button></div></div>
+    <div class="row"><span>Window shape</span>
+      <div class="seg" data-key="shape"><button>16:9</button><button>Wide</button></div></div>
+  </div>
+
+  <div class="card">
+    <canvas id="cv"></canvas>
+    <div class="bar"><i id="prog"></i></div>
+    <div class="meta" id="status">Ready.</div>
+    <button class="btn" id="build">Build teleprompter</button>
+    <div class="warn hidden" id="rtWarn">This connection builds in real time (takes as long as the read). Keep this tab open and the screen on until it finishes.</div>
+  </div>
+
+  <div class="card" id="out">
+    <video id="vid" playsinline muted controls></video>
+    <button class="btn go" id="pip">Float it (Picture‑in‑Picture)</button>
+    <button class="btn ghost" id="dl" style="margin-top:8px">Save video</button>
+    <div class="note">Tip: in the floating window, ⏯ pauses and ±15s skips — use it to repeat a line.</div>
+  </div>
+
+  <div class="card">
+    <label class="h">How to record</label>
+    <ol>
+      <li>Paste script → <b>Build teleprompter</b>.</li>
+      <li>Tap <b>Float it</b>. A small window appears.</li>
+      <li>Swipe home and open the <b>Camera</b> app (Video, front camera).</li>
+      <li>Pinch the floating window to enlarge it, drag it to the <b>top edge</b> near the lens.</li>
+      <li>Tap ▶ in the window, then start recording. The countdown gives you time.</li>
+    </ol>
+    <div class="note">The floating window is not captured in your recording — iOS only records the camera feed.</div>
+  </div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const FPS = 30;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('fp.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('fp.' + k, JSON.stringify(v)); } catch {} },
+};
+
+const DEFAULT_SCRIPT = `Today, literally anyone can create a crazy-looking video using AI.
+
+But that's not going to make people trust you.
+
+What makes people trust you is your face, your voice, and your story.`;
+
+const settings = {
+  wpm: store.get('wpm', 140),
+  lines: store.get('lines', '5'),
+  lead: store.get('lead', '3'),
+  font: store.get('font', 'Mono'),
+  shape: store.get('shape', '16:9'),
+};
+
+// ---------- UI wiring ----------
+const ta = $('script');
+ta.value = store.get('script', DEFAULT_SCRIPT);
+const wpm = $('wpm');
+wpm.value = settings.wpm;
+
+function updateMeta() {
+  const words = countWords(ta.value);
+  const secs = words / settings.wpm * 60;
+  $('meta').textContent = `${words} words · ~${fmt(secs)} at ${settings.wpm} wpm`;
+}
+function fmt(s) { s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+function countWords(t) { return (t.trim().match(/\S+/g) || []).length; }
+
+ta.addEventListener('input', () => { store.set('script', ta.value); updateMeta(); invalidate(); });
+wpm.addEventListener('input', () => {
+  settings.wpm = +wpm.value; store.set('wpm', settings.wpm);
+  $('wpmV').textContent = settings.wpm + ' wpm'; updateMeta(); invalidate();
+});
+$('wpmV').textContent = settings.wpm + ' wpm';
+
+document.querySelectorAll('.seg').forEach((seg) => {
+  const key = seg.dataset.key;
+  const paint = () => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.textContent === settings[key]));
+  seg.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') return;
+    settings[key] = e.target.textContent; store.set(key, settings[key]); paint(); invalidate();
+  });
+  paint();
+});
+updateMeta();
+
+// ---------- Teleprompter model ----------
+const cv = $('cv');
+const ctx = cv.getContext('2d');
+
+function dims() {
+  return settings.shape === 'Wide' ? { W: 1280, H: 560 } : { W: 1280, H: 720 };
+}
+function fontFamily() {
+  return settings.font === 'Mono' ? '"IBM Plex Mono", Menlo, "Courier New", monospace' : 'Inter, -apple-system, "Helvetica Neue", Arial, sans-serif';
+}
+
+function buildModel() {
+  const { W, H } = dims();
+  cv.width = W; cv.height = H;
+  const nLines = +settings.lines;
+  const LH = H / (nLines + 0.35);
+  const fontPx = Math.round(LH * 0.56);
+  const font = `500 ${fontPx}px ${fontFamily()}`;
+  ctx.font = font;
+  const maxW = W * 0.88;
+  const spw = 60 / settings.wpm;
+
+  // wrap into lines, carrying timing per line
+  const lines = [];
+  const paras = ta.value.replace(/\r/g, '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  paras.forEach((p, pi) => {
+    const words = p.split(/\s+/);
+    let cur = [];
+    const flush = (last) => {
+      if (!cur.length) return;
+      let dur = 0;
+      for (const w of cur) {
+        dur += spw;
+        if (/[.!?…]["')\]]?$/.test(w)) dur += 0.35;
+        else if (/[,;:—–-]["')\]]?$/.test(w)) dur += 0.15;
+      }
+      if (last && pi < paras.length - 1) dur += 0.5;
+      lines.push({ text: cur.join(' '), dur });
+      cur = [];
+    };
+    words.forEach((w) => {
+      const test = cur.length ? cur.join(' ') + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && cur.length) flush(false);
+      cur.push(w);
+    });
+    flush(true);
+  });
+  let t = 0;
+  for (const l of lines) { l.start = t; t += l.dur; }
+  const lead = +settings.lead;
+  const tail = 2;
+  return { W, H, LH, font, lines, lead, body: t, tail, total: lead + t + tail, nLines };
+}
+
+const ease = (x) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+
+function draw(m, time) {
+  const { W, H, LH, lines } = m;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // eye-line cue: small green dot at top centre (where the lens is)
+  ctx.fillStyle = '#2fd36b';
+  ctx.beginPath(); ctx.arc(W / 2, LH * 0.17, Math.max(6, LH * 0.05), 0, Math.PI * 2); ctx.fill();
+
+  const t = time - m.lead;
+  // fractional scroll position in lines
+  let f = 0, cur = 0;
+  if (t >= m.body) { f = lines.length; cur = lines.length; }
+  else if (t > 0) {
+    let i = 0;
+    while (i < lines.length - 1 && lines[i + 1].start <= t) i++;
+    const p = (t - lines[i].start) / lines[i].dur;
+    const glide = 0.28;
+    f = i + (p > 1 - glide ? ease((p - (1 - glide)) / glide) : 0);
+    cur = f; // continuous "current line" for highlight blending
+  }
+
+  const anchorY = LH * 0.35 + LH * 1.5; // reading line = 2nd visible line
+  ctx.font = m.font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const first = Math.max(0, Math.floor(f) - 2);
+  const last = Math.min(lines.length - 1, Math.ceil(f) + m.nLines + 1);
+  for (let k = first; k <= last; k++) {
+    const y = anchorY + (k - f) * LH;
+    if (y < -LH || y > H + LH) continue;
+    const d = k - cur; // 0 = reading now, <0 already read, >0 upcoming
+    let a;
+    if (d <= -1) a = 0.28;
+    else if (d < 0) a = 1 - (-d) * 0.72;
+    else if (d < 1) a = 1 - d * 0.55;
+    else a = 0.45;
+    // fade near top/bottom edges
+    const edge = Math.min(1, Math.max(0, (y + LH * 0.2) / (LH * 0.9)), Math.max(0, (H - y) / (LH * 0.9)));
+    ctx.fillStyle = `rgba(255,255,255,${(a * edge).toFixed(3)})`;
+    ctx.fillText(lines[k].text, W / 2, y);
+  }
+
+  // countdown
+  if (t < 0) {
+    const n = Math.ceil(-t);
+    ctx.font = `600 ${Math.round(LH * 0.5)}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(47,211,107,0.95)';
+    ctx.fillText(String(n), W - LH * 0.35, LH * 0.45);
+  }
+  if (t >= m.body) {
+    ctx.font = `500 ${Math.round(LH * 0.42)}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('— end —', W / 2, anchorY);
+  }
+
+  // progress
+  const prog = Math.min(1, Math.max(0, t / m.body));
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(0, H - 6, W, 6);
+  ctx.fillStyle = 'rgba(107,120,255,0.9)';
+  ctx.fillRect(0, H - 6, W * prog, 6);
+}
+
+// static preview of the first frame whenever settings change
+let videoURL = null;
+async function invalidate() {
+  await fontsReady();
+  const m = buildModel();
+  draw(m, m.lead + 0.001);
+  if (videoURL) {
+    $('status').textContent = 'Script or settings changed — rebuild to update the floating video.';
+  }
+}
+let fontsP = null;
+function fontsReady() {
+  if (!fontsP) fontsP = Promise.race([
+    Promise.all([
+      document.fonts.load('500 40px "IBM Plex Mono"'),
+      document.fonts.load('500 40px Inter'),
+      document.fonts.load('600 40px Inter'),
+    ]),
+    new Promise((r) => setTimeout(r, 2500)),
+  ]).catch(() => {});
+  return fontsP;
+}
+invalidate();
+
+// ---------- Video building ----------
+const canFast = () => window.isSecureContext && 'VideoEncoder' in window && 'VideoFrame' in window;
+if (!canFast()) $('rtWarn').classList.remove('hidden');
+
+function setProgress(p, msg) {
+  $('prog').style.width = (p * 100).toFixed(1) + '%';
+  if (msg) $('status').textContent = msg;
+}
+
+async function buildFast(m) {
+  const { Muxer, ArrayBufferTarget } = await import('https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/+esm');
+  const codecs = ['avc1.42001f', 'avc1.4d001f', 'avc1.640028', 'avc1.42002a'];
+  let config = null;
+  for (const codec of codecs) {
+    const c = { codec, width: m.W, height: m.H, bitrate: 2_500_000, framerate: FPS, avc: { format: 'avc' } };
+    try { const s = await VideoEncoder.isConfigSupported(c); if (s.supported) { config = c; break; } } catch {}
+  }
+  if (!config) throw new Error('No H.264 encoder');
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({ target, video: { codec: 'avc', width: m.W, height: m.H, frameRate: FPS }, fastStart: 'in-memory' });
+  let err = null;
+  const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => { err = e; } });
+  enc.configure(config);
+  const frames = Math.ceil(m.total * FPS);
+  for (let i = 0; i < frames; i++) {
+    if (err) throw err;
+    draw(m, i / FPS);
+    const vf = new VideoFrame(cv, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+    enc.encode(vf, { keyFrame: i % (FPS * 2) === 0 });
+    vf.close();
+    while (enc.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 1));
+    if (i % 15 === 0) { setProgress(i / frames, `Building… ${Math.round(i / frames * 100)}%`); await new Promise((r) => setTimeout(r, 0)); }
+  }
+  await enc.flush();
+  if (err) throw err;
+  muxer.finalize();
+  return new Blob([target.buffer], { type: 'video/mp4' });
+}
+
+function buildRealtime(m) {
+  return new Promise((resolve, reject) => {
+    const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
+    const mime = types.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+    if (!window.MediaRecorder || !cv.captureStream) return reject(new Error('This browser cannot record video'));
+    const stream = cv.captureStream(FPS);
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 2_500_000 } : undefined);
+    const chunks = [];
+    rec.ondataavailable = (e) => e.data && e.data.size && chunks.push(e.data);
+    rec.onstop = () => { stream.getTracks().forEach((tr) => tr.stop()); resolve(new Blob(chunks, { type: rec.mimeType || mime || 'video/mp4' })); };
+    rec.onerror = (e) => reject(e.error || new Error('Recorder error'));
+    draw(m, 0);
+    rec.start(1000);
+    const t0 = performance.now();
+    const tick = () => {
+      const s = (performance.now() - t0) / 1000;
+      draw(m, Math.min(s, m.total));
+      setProgress(s / m.total, `Building in real time… ${fmt(Math.max(0, m.total - s))} left — keep this screen open`);
+      if (s >= m.total) { rec.stop(); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+let blob = null;
+$('build').addEventListener('click', async () => {
+  if (!countWords(ta.value)) { $('status').textContent = 'Paste a script first.'; return; }
+  const btn = $('build');
+  btn.disabled = true; $('pip').disabled = true;
+  await fontsReady();
+  const m = buildModel();
+  let wake = null;
+  try { wake = await navigator.wakeLock?.request('screen'); } catch {}
+  try {
+    const t0 = performance.now();
+    if (canFast()) {
+      try { blob = await buildFast(m); }
+      catch (e) { console.warn('Fast build failed, falling back', e); $('rtWarn').classList.remove('hidden'); blob = await buildRealtime(m); }
+    } else {
+      blob = await buildRealtime(m);
+    }
+    if (videoURL) URL.revokeObjectURL(videoURL);
+    videoURL = URL.createObjectURL(blob);
+    const v = $('vid');
+    v.src = videoURL;
+    v.load();
+    $('out').style.display = 'block';
+    setProgress(1, `Ready — ${fmt(m.total)} video built in ${((performance.now() - t0) / 1000).toFixed(1)}s. Tap “Float it”.`);
+    draw(m, m.lead + 0.001);
+    $('out').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    console.error(e);
+    $('status').textContent = 'Build failed: ' + (e.message || e);
+  } finally {
+    btn.disabled = false; $('pip').disabled = false;
+    try { await wake?.release(); } catch {}
+  }
+});
+
+// ---------- Picture-in-Picture ----------
+$('pip').addEventListener('click', async () => {
+  const v = $('vid');
+  v.muted = true;
+  try {
+    if (document.pictureInPictureElement) { await document.exitPictureInPicture(); return; }
+    if (v.currentTime > 0 && v.ended) v.currentTime = 0;
+    if (v.requestPictureInPicture && document.pictureInPictureEnabled !== false) {
+      await v.requestPictureInPicture();
+    } else if (v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture')) {
+      v.webkitSetPresentationMode('picture-in-picture');
+    } else {
+      throw new Error('Picture-in-Picture is not supported in this browser. Use Safari on iPhone.');
+    }
+    v.pause();
+    v.currentTime = 0;
+    $('status').textContent = 'Floating. Open Camera, place the window at the top, tap ▶ when ready.';
+  } catch (e) {
+    $('status').textContent = 'Could not float: ' + (e.message || e);
+  }
+});
+
+$('dl').addEventListener('click', () => {
+  if (!blob) return;
+  const a = document.createElement('a');
+  a.href = videoURL;
+  a.download = 'teleprompter.' + (blob.type.includes('webm') ? 'webm' : 'mp4');
+  document.body.appendChild(a); a.click(); a.remove();
+});
+</script>
+</body>
+</html>
