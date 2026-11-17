@@ -56,6 +56,27 @@
   .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
   .warn { color: #ffb648; font-size: 13px; margin-top: 8px; }
   .hidden { display: none !important; }
+
+  /* ---------- camera mode ---------- */
+  #cam { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column; }
+  #cam .tp { padding-top: env(safe-area-inset-top); flex: none; }
+  #cam .tp canvas { border: 0; border-radius: 0; }
+  #cam .stage { position: relative; flex: 1; margin: 6px 8px max(8px, env(safe-area-inset-bottom)); border-radius: 28px; overflow: hidden; background: #111; }
+  #camv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); border: 0; border-radius: 0; }
+  #cam .ctrls { position: absolute; left: 0; right: 0; bottom: 18px; display: flex; align-items: center; justify-content: space-around; }
+  .round { width: 52px; height: 52px; border-radius: 50%; border: 0; background: rgba(40,40,46,.75); color: #fff; font: 600 18px Inter, system-ui, sans-serif; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  #recBtn { width: 78px; height: 78px; border-radius: 50%; border: 4px solid #fff; background: transparent; display: grid; place-items: center; padding: 0; }
+  #recBtn::after { content: ''; width: 60px; height: 60px; border-radius: 50%; background: #ff3b30; transition: all .2s; }
+  #recBtn.on::after { width: 30px; height: 30px; border-radius: 7px; }
+  .spd { display: flex; align-items: center; gap: 4px; background: rgba(40,40,46,.75); border-radius: 26px; padding: 4px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .spd button { width: 36px; height: 36px; border-radius: 50%; border: 0; background: #2c2c33; color: #fff; font: 600 18px Inter, system-ui, sans-serif; }
+  .spd span { min-width: 34px; text-align: center; font-size: 13px; color: #ddd; font-variant-numeric: tabular-nums; }
+  #recBadge { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: #ff3b30; color: #fff; font: 600 13px Inter, system-ui, sans-serif; padding: 5px 10px; border-radius: 12px; font-variant-numeric: tabular-nums; }
+  #camMsg { position: absolute; top: 14px; left: 14px; right: 14px; text-align: center; color: #ddd; font-size: 13px; text-shadow: 0 1px 3px #000; }
+  #review { position: absolute; inset: 0; background: #000; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+  #review video { flex: 1; min-height: 0; object-fit: contain; border: 0; }
+  #review .two { display: flex; gap: 10px; }
+  #review .two .btn { margin: 0; }
 </style>
 </head>
 <body>
@@ -81,6 +102,14 @@
   </div>
 
   <div class="card">
+    <label class="h">Option A: record right here (recommended)</label>
+    <div class="note" style="margin-top:0;margin-bottom:10px">Front camera with your script at the top, next to the lens. Saves to Photos. Tap the text to pause/resume it; − / + changes speed live.</div>
+    <button class="btn go" id="camBtn">Open camera with teleprompter</button>
+  </div>
+
+  <div class="card">
+    <label class="h">Option B: float over the Camera app</label>
+    <div class="note" style="margin-top:0;margin-bottom:10px">Good for rehearsing. iOS pauses and blanks the floating window once the Camera app starts recording.</div>
     <canvas id="cv"></canvas>
     <div class="bar"><i id="prog"></i></div>
     <div class="meta" id="status">Ready.</div>
@@ -95,8 +124,29 @@
     <div class="note">Tip: in the floating window, ⏯ pauses and ±15s skips — use it to repeat a line.</div>
   </div>
 
+  <div id="cam" class="hidden">
+    <div class="tp" id="tpWrap"><canvas id="tpc"></canvas></div>
+    <div class="stage">
+      <video id="camv" playsinline muted autoplay></video>
+      <div id="camMsg">Starting camera…</div>
+      <div id="recBadge" class="hidden">● <span id="recT">0:00</span></div>
+      <div class="ctrls">
+        <button class="round" id="camClose" aria-label="Close">✕</button>
+        <button id="recBtn" aria-label="Record"></button>
+        <div class="spd"><button id="slower" aria-label="Slower">−</button><span id="spdV">140</span><button id="faster" aria-label="Faster">+</button></div>
+      </div>
+      <div id="review" class="hidden">
+        <video id="revv" playsinline controls></video>
+        <div class="two">
+          <button class="btn ghost" id="retake">Retake</button>
+          <button class="btn go" id="saveTake">Save to Photos</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="card">
-    <label class="h">How to record</label>
+    <label class="h">How to use Option B</label>
     <ol>
       <li>Paste script → <b>Build teleprompter</b>.</li>
       <li>Tap <b>Float it</b>. A small window appears.</li>
@@ -163,7 +213,7 @@ updateMeta();
 
 // ---------- Teleprompter model ----------
 const cv = $('cv');
-const ctx = cv.getContext('2d');
+const ctx0 = cv.getContext('2d');
 
 function dims() {
   return settings.shape === 'Wide' ? { W: 1280, H: 560 } : { W: 1280, H: 720 };
@@ -179,7 +229,7 @@ function buildModel() {
   const LH = H / (nLines + 0.35);
   const fontPx = Math.round(LH * 0.56);
   const font = `500 ${fontPx}px ${fontFamily()}`;
-  ctx.font = font;
+  ctx0.font = font;
   const maxW = W * 0.88;
   const spw = 60 / settings.wpm;
 
@@ -203,7 +253,7 @@ function buildModel() {
     };
     words.forEach((w) => {
       const test = cur.length ? cur.join(' ') + ' ' + w : w;
-      if (ctx.measureText(test).width > maxW && cur.length) flush(false);
+      if (ctx0.measureText(test).width > maxW && cur.length) flush(false);
       cur.push(w);
     });
     flush(true);
@@ -212,12 +262,12 @@ function buildModel() {
   for (const l of lines) { l.start = t; t += l.dur; }
   const lead = +settings.lead;
   const tail = 2;
-  return { W, H, LH, font, lines, lead, body: t, tail, total: lead + t + tail, nLines };
+  return { W, H, LH, font, lines, lead, body: t, tail, total: lead + t + tail, nLines, wpm: settings.wpm };
 }
 
 const ease = (x) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
 
-function draw(m, time) {
+function draw(m, time, ctx = ctx0) {
   const { W, H, LH, lines } = m;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
@@ -435,6 +485,134 @@ $('dl').addEventListener('click', () => {
   a.download = 'teleprompter.' + (blob.type.includes('webm') ? 'webm' : 'mp4');
   document.body.appendChild(a); a.click(); a.remove();
 });
+
+// ---------- Camera mode: record in the browser with the prompter on top ----------
+const tpc = $('tpc');
+const tctx = tpc.getContext('2d');
+const camv = $('camv');
+let camStream = null, live = null, rec = null, recChunks = [], recStart = 0, takeBlob = null, takeURL = null, camWake = null;
+
+function camMsg(t) { $('camMsg').textContent = t || ''; $('camMsg').classList.toggle('hidden', !t); }
+
+async function openCam() {
+  if (!countWords(ta.value)) { $('status').textContent = 'Paste a script first.'; ta.focus(); return; }
+  await fontsReady();
+  const m = buildModel();
+  tpc.width = m.W; tpc.height = m.H;
+  live = { m, t: m.lead, running: false, last: performance.now(), wpm: settings.wpm };
+  $('spdV').textContent = live.wpm;
+  $('cam').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  $('review').classList.add('hidden');
+  camMsg('Starting camera…');
+  requestAnimationFrame(loop);
+  try {
+    const portrait = innerHeight >= innerWidth;
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: portrait ? 1080 : 1920 }, height: { ideal: portrait ? 1920 : 1080 }, frameRate: { ideal: 30 } },
+      audio: true,
+    });
+    camv.srcObject = camStream;
+    await camv.play().catch(() => {});
+    camMsg('Tap ● to record. The countdown starts with it.');
+  } catch (e) {
+    camMsg('Camera blocked: ' + (e.message || e.name) + '. Allow camera + microphone for this site in Safari (aA → Website Settings).');
+  }
+  try { camWake = await navigator.wakeLock?.request('screen'); } catch {}
+}
+
+function loop(now) {
+  if (!live) return;
+  const dt = Math.min(0.1, (now - live.last) / 1000);
+  live.last = now;
+  if (live.running) {
+    live.t += dt * live.wpm / live.m.wpm;
+    if (live.t >= live.m.total) { live.t = live.m.total; live.running = false; }
+  }
+  draw(live.m, live.t, tctx);
+  if (rec && rec.state === 'recording') $('recT').textContent = fmt((performance.now() - recStart) / 1000);
+  requestAnimationFrame(loop);
+}
+
+function startRec() {
+  if (!camStream) return;
+  const types = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
+  const mime = types.find((t) => MediaRecorder.isTypeSupported(t));
+  const opts = { videoBitsPerSecond: 10_000_000, audioBitsPerSecond: 160_000 };
+  if (mime) opts.mimeType = mime;
+  rec = new MediaRecorder(camStream, opts);
+  recChunks = [];
+  rec.ondataavailable = (e) => e.data && e.data.size && recChunks.push(e.data);
+  rec.onstop = showReview;
+  rec.start(1000);
+  recStart = performance.now();
+  live.t = 0; live.running = true;
+  $('recBtn').classList.add('on');
+  $('recBadge').classList.remove('hidden');
+  camMsg('');
+}
+
+function stopRec() {
+  if (rec && rec.state !== 'inactive') rec.stop();
+  live.running = false;
+  $('recBtn').classList.remove('on');
+  $('recBadge').classList.add('hidden');
+}
+
+function showReview() {
+  takeBlob = new Blob(recChunks, { type: rec.mimeType || 'video/mp4' });
+  if (takeURL) URL.revokeObjectURL(takeURL);
+  takeURL = URL.createObjectURL(takeBlob);
+  $('revv').src = takeURL;
+  $('review').classList.remove('hidden');
+}
+
+async function saveTake() {
+  if (!takeBlob) return;
+  const ext = takeBlob.type.includes('webm') ? 'webm' : 'mp4';
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  const file = new File([takeBlob], `take-${stamp}.${ext}`, { type: takeBlob.type });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file] }); // iOS: choose “Save Video”
+      return;
+    }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = takeURL; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function closeCam() {
+  if (rec && rec.state === 'recording') stopRec();
+  camStream?.getTracks().forEach((t) => t.stop());
+  camStream = null; live = null;
+  camv.srcObject = null;
+  $('cam').classList.add('hidden');
+  document.body.style.overflow = '';
+  try { camWake?.release(); } catch {}
+  camWake = null;
+}
+
+$('camBtn').addEventListener('click', openCam);
+$('camClose').addEventListener('click', closeCam);
+$('recBtn').addEventListener('click', () => (rec && rec.state === 'recording' ? stopRec() : startRec()));
+$('retake').addEventListener('click', () => {
+  $('review').classList.add('hidden');
+  $('revv').removeAttribute('src');
+  live.t = live.m.lead; live.running = false;
+  camMsg('Tap ● to record. The countdown starts with it.');
+});
+$('saveTake').addEventListener('click', saveTake);
+$('tpWrap').addEventListener('click', () => {
+  if (!live) return;
+  if (live.t >= live.m.total) live.t = live.m.lead;
+  live.running = !live.running;
+});
+const nudge = (d) => { if (!live) return; live.wpm = Math.max(60, Math.min(300, live.wpm + d)); $('spdV').textContent = live.wpm; };
+$('slower').addEventListener('click', () => nudge(-10));
+$('faster').addEventListener('click', () => nudge(10));
+document.addEventListener('visibilitychange', () => { if (document.hidden && rec && rec.state === 'recording') stopRec(); });
 </script>
 </body>
 </html>
